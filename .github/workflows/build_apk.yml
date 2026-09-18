@@ -28,4 +28,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CanKhonTuTien-APK
-          path: game.apk
+          path: |
+            *.apk
+            **/*.apk
+            /home/runner/work/**/*
