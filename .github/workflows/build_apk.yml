@@ -22,13 +22,10 @@ jobs:
           relative_project_path: ""
           archive_output: false
           export_debug: true
-          use_preset_export_path: false
+          build_export_path: "build/CanKhonTuTien.apk"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CanKhonTuTien-APK
-          path: |
-            *.apk
-            **/*.apk
-            /home/runner/work/**/*
+          path: build/
