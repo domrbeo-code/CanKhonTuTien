@@ -1,0 +1,15 @@
+[gd_scene format=3 uid="uid://ce1q25i77ucty"]
+
+[ext_resource type="Script" uid="uid://clf5mkewuf1io" path="res://main_game.gd" id="1_main"]
+
+[node name="MainGame" type="Control" unique_id=677543984]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="HTTPRequest" type="HTTPRequest" parent="." unique_id=1712751790]
+unique_name_in_owner = true
