@@ -17,8 +17,10 @@ jobs:
       - name: Compile Godot APK
         uses: firebelley/godot-export@v5.2.0
         with:
-          godot-version-sub: "3"
-          godot: 4.3.0
+          godot_executable_download_url: "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip"
+          godot_export_templates_download_url: "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz"
+          relative_project_path: ""
+          archive_output: false
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
