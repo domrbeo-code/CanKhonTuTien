@@ -22,10 +22,16 @@ jobs:
           relative_project_path: ""
           archive_output: false
           export_debug: true
-          build_export_path: "build/CanKhonTuTien.apk"
+          use_preset_export_path: true
+
+      - name: Move APK to Build Folder
+        run: |
+          mkdir -p build
+          find . -name "*.apk" -exec cp {} build/ \;
+          ls -la build/
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CanKhonTuTien-APK
-          path: build/
+          path: build/*.apk
