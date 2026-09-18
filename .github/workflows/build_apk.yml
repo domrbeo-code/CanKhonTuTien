@@ -1,0 +1,30 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Godot APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build Godot APK Action
+        uses: abarrak/godot-action@v1.1.0
+        with:
+          name: CanKhonTuTien
+          windows: false
+          android: true
+          godot-version: "4.3.0"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CanKhonTuTien-APK
+          path: |
+            **/*.apk
