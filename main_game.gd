@@ -16,6 +16,7 @@ const OFFLINE_MAX_SECONDS := 28800.0
 const OFFLINE_EFFICIENCY := 0.35
 const COLLECT_COOLDOWN_SECONDS := 2.5
 const CLOUD_REQUEST_COOLDOWN_SECONDS := 2.5
+const TOUCH_SCROLL_DRAG_THRESHOLD := 10.0
 const SPIRIT_STONE_VALUES: Dictionary = {"Hạ phẩm": 5000.0, "Trung phẩm": 100000.0, "Thượng phẩm": 2000000.0, "Cực phẩm": 40000000.0}
 const ELIXIR_TIERS: Array[Dictionary] = [
 	{"name": "Phàm Phẩm", "rarity_index": 0, "multiplier": 1.0},
@@ -173,6 +174,13 @@ var global_log_view: RichTextLabel
 var world_chat_input: LineEdit
 var world_chat_send_button: Button
 var global_log_lines: Array[String] = []
+var touch_scroll_container: ScrollContainer
+var touch_scroll_index := -1
+var touch_scroll_start_position := Vector2.ZERO
+var touch_scroll_last_position := Vector2.ZERO
+var touch_scroll_dragging := false
+var touch_scroll_velocity := 0.0
+var touch_scroll_horizontal := false
 var mobile_navigation: HBoxContainer
 var mobile_navigation_buttons: Array[Button] = []
 var mobile_active_section := "cultivation"
@@ -482,6 +490,7 @@ func _ready() -> void:
 	append_global_log("Càn Khôn Tu Tiên · Kết nối thế giới tu tiên")
 
 func _process(delta: float) -> void:
+	_update_touch_scroll_inertia(delta)
 	collect_cooldown_remaining = maxf(0.0, collect_cooldown_remaining - delta)
 	cloud_request_cooldown_remaining = maxf(0.0, cloud_request_cooldown_remaining - delta)
 	if cultivation["body_mode"]:
@@ -518,6 +527,7 @@ func _process(delta: float) -> void:
 		_update_display()
 
 func _input(event: InputEvent) -> void:
+	_handle_touch_scroll_event(event)
 	if breakthrough_minigame_active and event is InputEventKey and event.pressed and not event.is_echo():
 		if event.keycode in [KEY_SPACE, KEY_ENTER, KEY_KP_ENTER]:
 			_resolve_breakthrough_minigame()
@@ -529,6 +539,99 @@ func _input(event: InputEvent) -> void:
 			return
 	if event is InputEventMouseButton and event.pressed:
 		_spawn_click_effect(event.position)
+
+func _handle_touch_scroll_event(event: InputEvent) -> void:
+	if not touch_mode_active or breakthrough_minigame_active or is_instance_valid(active_combat):
+		return
+	if is_instance_valid(auth_overlay) and auth_overlay.visible:
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			touch_scroll_index = event.index
+			var scroll_root: Node = popup_overlay if is_instance_valid(popup_overlay) and popup_overlay.visible else self
+			touch_scroll_container = _find_deepest_scroll_container(scroll_root, event.position, null, INF)
+			touch_scroll_start_position = event.position
+			touch_scroll_last_position = event.position
+			touch_scroll_dragging = false
+			touch_scroll_velocity = 0.0
+			touch_scroll_horizontal = false
+		else:
+			var completed_drag: bool = event.index == touch_scroll_index and touch_scroll_dragging
+			if completed_drag:
+				get_viewport().set_input_as_handled()
+			touch_scroll_index = -1
+			touch_scroll_dragging = false
+			if not completed_drag or absf(touch_scroll_velocity) < 35.0:
+				touch_scroll_container = null
+				touch_scroll_velocity = 0.0
+	elif event is InputEventScreenDrag and event.index == touch_scroll_index and is_instance_valid(touch_scroll_container):
+		if not touch_scroll_dragging and event.position.distance_to(touch_scroll_start_position) >= TOUCH_SCROLL_DRAG_THRESHOLD:
+			touch_scroll_dragging = true
+			var drag_vector: Vector2 = event.position - touch_scroll_start_position
+			var vertical_bar := touch_scroll_container.get_v_scroll_bar()
+			var horizontal_bar := touch_scroll_container.get_h_scroll_bar()
+			var can_scroll_vertical := vertical_bar.max_value > vertical_bar.page + 1.0
+			var can_scroll_horizontal := horizontal_bar.max_value > horizontal_bar.page + 1.0
+			touch_scroll_horizontal = can_scroll_horizontal and (not can_scroll_vertical or absf(drag_vector.x) > absf(drag_vector.y))
+		if touch_scroll_dragging:
+			if touch_scroll_horizontal:
+				var horizontal_delta = event.position.x - touch_scroll_last_position.x
+				var horizontal_scrollbar := touch_scroll_container.get_h_scroll_bar()
+				var horizontal_max := maxf(0.0, horizontal_scrollbar.max_value - horizontal_scrollbar.page)
+				touch_scroll_container.scroll_horizontal = clampi(roundi(float(touch_scroll_container.scroll_horizontal) - horizontal_delta), 0, roundi(horizontal_max))
+				touch_scroll_velocity = -event.velocity.x
+			else:
+				var vertical_delta = event.position.y - touch_scroll_last_position.y
+				var vertical_scrollbar := touch_scroll_container.get_v_scroll_bar()
+				var vertical_max := maxf(0.0, vertical_scrollbar.max_value - vertical_scrollbar.page)
+				touch_scroll_container.scroll_vertical = clampi(roundi(float(touch_scroll_container.scroll_vertical) - vertical_delta), 0, roundi(vertical_max))
+				touch_scroll_velocity = -event.velocity.y
+			touch_scroll_last_position = event.position
+			get_viewport().set_input_as_handled()
+
+func _update_touch_scroll_inertia(delta: float) -> void:
+	if not touch_mode_active or touch_scroll_dragging or not is_instance_valid(touch_scroll_container):
+		return
+	if breakthrough_minigame_active or is_instance_valid(active_combat) or (is_instance_valid(auth_overlay) and auth_overlay.visible):
+		touch_scroll_container = null
+		touch_scroll_velocity = 0.0
+		return
+	if absf(touch_scroll_velocity) < 35.0:
+		touch_scroll_container = null
+		touch_scroll_velocity = 0.0
+		return
+	var scrollbar: ScrollBar = touch_scroll_container.get_h_scroll_bar() if touch_scroll_horizontal else touch_scroll_container.get_v_scroll_bar()
+	var current_scroll := float(touch_scroll_container.scroll_horizontal) if touch_scroll_horizontal else float(touch_scroll_container.scroll_vertical)
+	var max_scroll := maxf(0.0, scrollbar.max_value - scrollbar.page)
+	var next_scroll := clampf(current_scroll + touch_scroll_velocity * delta, 0.0, max_scroll)
+	if is_equal_approx(next_scroll, current_scroll):
+		touch_scroll_velocity = 0.0
+	else:
+		if touch_scroll_horizontal:
+			touch_scroll_container.scroll_horizontal = roundi(next_scroll)
+		else:
+			touch_scroll_container.scroll_vertical = roundi(next_scroll)
+		touch_scroll_velocity = move_toward(touch_scroll_velocity, 0.0, 1800.0 * delta)
+
+func _find_deepest_scroll_container(node: Node, screen_position: Vector2, current_best: ScrollContainer, current_area: float) -> ScrollContainer:
+	if node is Control and not node.is_visible_in_tree():
+		return current_best
+	var best := current_best
+	var best_area := current_area
+	if node is ScrollContainer:
+		var scroll := node as ScrollContainer
+		var rect := scroll.get_global_rect()
+		var scrollbar := scroll.get_v_scroll_bar()
+		var horizontal_bar := scroll.get_h_scroll_bar()
+		var has_scroll_range := scrollbar.max_value > scrollbar.page + 1.0 or horizontal_bar.max_value > horizontal_bar.page + 1.0
+		if rect.has_point(screen_position) and has_scroll_range and rect.get_area() < best_area:
+			best = scroll
+			best_area = rect.get_area()
+	for child in node.get_children():
+		best = _find_deepest_scroll_container(child, screen_position, best, best_area)
+		if is_instance_valid(best):
+			best_area = best.get_global_rect().get_area()
+	return best
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
@@ -813,7 +916,7 @@ func _update_responsive_layout() -> void:
 	if is_instance_valid(mobile_navigation):
 		mobile_navigation.visible = compact
 	if is_instance_valid(main_root):
-		main_root.add_theme_constant_override("separation", 8 if compact else 16)
+		main_root.add_theme_constant_override("separation", 12 if compact else 16)
 	if is_instance_valid(header_title_label):
 		header_title_label.add_theme_font_size_override("font_size", 18 if compact else 25)
 	if is_instance_valid(cloud_status_label):
@@ -829,16 +932,16 @@ func _update_responsive_layout() -> void:
 		main_columns.vertical = compact
 		main_columns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		main_columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		main_columns.add_theme_constant_override("separation", 10 if compact else 14)
+		main_columns.add_theme_constant_override("separation", 14)
 	if is_instance_valid(main_content_row):
 		main_content_row.vertical = not side_dock
-		main_content_row.add_theme_constant_override("separation", 8 if compact else 10)
+		main_content_row.add_theme_constant_override("separation", 12 if compact else 10)
 	if is_instance_valid(main_scroll):
 		main_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		main_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if is_instance_valid(global_log_panel):
 		global_log_panel.custom_minimum_size.x = 0 if not side_dock else 260
-		global_log_panel.custom_minimum_size.y = 205 if not side_dock else 0
+		global_log_panel.custom_minimum_size.y = 220 if not side_dock else 0
 		global_log_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL if not side_dock else Control.SIZE_SHRINK_END
 		global_log_panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER if not side_dock else Control.SIZE_EXPAND_FILL
 	if is_instance_valid(responsive_left_panel):
@@ -2191,6 +2294,33 @@ func _set_touch_sizing(node: Node, enabled: bool) -> void:
 			var base_font_size := int(child.get_meta("responsive_base_font_size", 12))
 			child.custom_minimum_size.y = maxf(base_height, 52.0) if enabled else base_height
 			child.add_theme_font_size_override("font_size", base_font_size + 2 if enabled else base_font_size)
+		elif child is ScrollContainer:
+			var vertical_bar = child.get_v_scroll_bar()
+			var horizontal_bar = child.get_h_scroll_bar()
+			if not child.has_meta("responsive_v_scroll_width"):
+				child.set_meta("responsive_v_scroll_width", vertical_bar.custom_minimum_size.x)
+				child.set_meta("responsive_h_scroll_height", horizontal_bar.custom_minimum_size.y)
+				child.set_meta("responsive_v_grabber", vertical_bar.get_theme_constant("grabber_min_size"))
+				child.set_meta("responsive_h_grabber", horizontal_bar.get_theme_constant("grabber_min_size"))
+			vertical_bar.custom_minimum_size.x = 22.0 if enabled else float(child.get_meta("responsive_v_scroll_width", 0.0))
+			horizontal_bar.custom_minimum_size.y = 22.0 if enabled else float(child.get_meta("responsive_h_scroll_height", 0.0))
+			vertical_bar.add_theme_constant_override("grabber_min_size", 44 if enabled else int(child.get_meta("responsive_v_grabber", 12)))
+			horizontal_bar.add_theme_constant_override("grabber_min_size", 44 if enabled else int(child.get_meta("responsive_h_grabber", 12)))
+			child.add_theme_constant_override("scrollbar_v_separation", 3 if enabled else 0)
+			child.add_theme_constant_override("scrollbar_h_separation", 3 if enabled else 0)
+		elif child is GridContainer:
+			if not child.has_meta("responsive_h_separation"):
+				child.set_meta("responsive_h_separation", child.get_theme_constant("h_separation"))
+				child.set_meta("responsive_v_separation", child.get_theme_constant("v_separation"))
+			var base_h := int(child.get_meta("responsive_h_separation", 0))
+			var base_v := int(child.get_meta("responsive_v_separation", 0))
+			child.add_theme_constant_override("h_separation", base_h + 3 if enabled else base_h)
+			child.add_theme_constant_override("v_separation", base_v + 3 if enabled else base_v)
+		elif child is BoxContainer:
+			if not child.has_meta("responsive_separation"):
+				child.set_meta("responsive_separation", child.get_theme_constant("separation"))
+			var base_separation := int(child.get_meta("responsive_separation", 0))
+			child.add_theme_constant_override("separation", base_separation + 2 if enabled else base_separation)
 		elif child is LineEdit:
 			if not child.has_meta("responsive_base_height"):
 				child.set_meta("responsive_base_height", child.custom_minimum_size.y)
